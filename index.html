@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Party Amigos</title>
+<meta name="description" content="Carrera de obstáculos con gominolas para jugar con tus amigos en el navegador.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E%F0%9F%8D%AC%3C/text%3E%3C/svg%3E">
+<style>
+  :root { --panel: #1b1440f0; --line: #ffffff22; --text: #fff; --muted: #c9c2ef; --accent: #ff5ca8; --accent2: #ffd23f; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #2a1d5c; color: var(--text); font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; user-select: none; -webkit-user-select: none; touch-action: none; }
+  canvas { display: block; }
+  [hidden] { display: none !important; }
+  button { font: inherit; cursor: pointer; border: 2px solid var(--line); background: #ffffff18; color: var(--text); border-radius: 14px; padding: 10px 16px; font-weight: 800; transition: transform .08s, background .15s; }
+  button:hover { background: #ffffff2a; }
+  button:active { transform: scale(.96); }
+  button.primary { background: linear-gradient(135deg, #ff5ca8, #ff8f3d); border-color: transparent; box-shadow: 0 4px 0 #b8326f; }
+  button.big { width: 100%; padding: 14px; font-size: 19px; }
+  button.link { background: none; border: none; color: var(--muted); text-decoration: underline; padding: 6px; font-weight: 600; }
+  input, select { font: inherit; color: var(--text); background: #00000055; border: 2px solid var(--line); border-radius: 10px; padding: 8px 10px; user-select: text; }
+  input[type=range] { padding: 0; accent-color: var(--accent); }
+  label { display: flex; align-items: center; gap: 10px; justify-content: space-between; margin: 10px 0; color: var(--muted); font-weight: 600; }
+  label > input:not([type=range]), label > select { flex: 1; max-width: 230px; }
+  .overlay { position: fixed; inset: 0; display: grid; place-items: center; padding: 16px; z-index: 10; }
+  #menu, #lobby { place-items: center end; padding-right: max(16px, 6vw); }
+  .panel { width: min(430px, 100%); max-height: 100%; overflow: auto; background: var(--panel); border: 2px solid var(--line); border-radius: 22px; padding: 22px 24px; box-shadow: 0 20px 60px #0008; }
+  h1 { margin: 0 0 10px; font-size: 42px; font-weight: 900; text-align: center; letter-spacing: 1px; line-height: 1; }
+  h1 span { display: block; font-size: 22px; color: var(--accent2); letter-spacing: 6px; }
+  h2 { margin: 0 0 12px; text-align: center; }
+  h3 { margin: 12px 0 6px; font-size: 14px; color: var(--muted); }
+  .row { display: flex; gap: 10px; margin: 14px 0; }
+  .row > button { flex: 1; }
+  .msg { color: var(--accent2); min-height: 1.2em; text-align: center; margin: 8px 0 0; font-weight: 600; }
+  .hint { color: var(--muted); font-size: 13px; margin: 6px 0 0; }
+  .swatches { display: flex; flex-wrap: wrap; gap: 7px; }
+  .swatch { width: 28px; height: 28px; padding: 0; border-radius: 50%; border: 3px solid transparent; }
+  .swatch.on { border-color: #fff; box-shadow: 0 0 0 2px #0008; }
+  #patterns { display: flex; gap: 6px; flex-wrap: wrap; }
+  #patterns button { padding: 6px 10px; font-size: 13px; border-radius: 10px; }
+  #patterns button.on { background: var(--accent); border-color: transparent; }
+  details { margin: 6px 0; color: var(--muted); }
+  details > div { display: flex; gap: 8px; margin-top: 8px; }
+  details input { flex: 1; text-transform: uppercase; letter-spacing: 3px; }
+  .controls { font-size: 12.5px; color: var(--muted); line-height: 1.7; border-top: 1px solid var(--line); margin-top: 12px; padding-top: 10px; }
+  kbd { background: #ffffff1a; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; font-size: 11.5px; color: var(--text); }
+  #linkBox { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+  #linkBox input { flex: 1; min-width: 0; }
+  #linkBox .hint { flex-basis: 100%; }
+  #players { list-style: none; padding: 0; margin: 8px 0 12px; max-height: 220px; overflow: auto; }
+  #players li { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; background: #ffffff10; margin-bottom: 6px; font-weight: 600; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; flex: none; box-shadow: 0 0 0 2px #0006; }
+  #loading { position: fixed; inset: 0; display: grid; place-items: center; font-size: 22px; font-weight: 800; background: #2a1d5c; z-index: 20; }
+  .sh { text-shadow: 0 3px 0 #0008, 0 0 12px #0006; }
+  #hud { position: fixed; inset: 0; pointer-events: none; z-index: 5; font-weight: 900; }
+  #qual { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); font-size: 24px; background: #1b1440cc; padding: 8px 18px; border-radius: 14px; }
+  #timer { position: absolute; top: 14px; right: 18px; font-size: 30px; font-variant-numeric: tabular-nums; }
+  #players-count { position: absolute; top: 18px; left: 18px; font-size: 16px; opacity: .9; }
+  #center { position: absolute; inset: 0; display: grid; place-items: center; font-size: 96px; text-align: center; }
+  #hint { position: absolute; left: 16px; bottom: 12px; font-size: 13px; font-weight: 600; opacity: .85; }
+  #toast { position: fixed; top: 22%; left: 50%; transform: translate(-50%, 0); font-size: 30px; font-weight: 900; opacity: 0; pointer-events: none; z-index: 15; text-shadow: 0 3px 0 #0009, 0 0 12px #000a; }
+  #toast.on { animation: toast 2s ease-out; }
+  @keyframes toast { 0% { opacity: 0; transform: translate(-50%, 10px); } 10%, 75% { opacity: 1; transform: translate(-50%, 0); } 100% { opacity: 0; } }
+  #resTable { width: 100%; border-collapse: collapse; font-size: 15px; }
+  #resTable td { padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  #resTable tr.me { color: var(--accent2); font-weight: 800; }
+  #results .panel { width: min(520px, 100%); }
+  #touch { position: fixed; inset: 0; pointer-events: none; z-index: 6; }
+  #touch button { position: absolute; pointer-events: auto; width: 84px; height: 84px; border-radius: 50%; font-size: 15px; background: #0006; border: 2px solid #ffffff55; }
+  #tJump { right: 22px; bottom: 34px; } #tDive { right: 118px; bottom: 34px; }
+  @media (max-width: 760px) { #menu, #lobby { place-items: end center; padding: 12px; } .panel { max-height: 62vh; } #center { font-size: 56px; } }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mqtt@5.10.1/dist/mqtt.min.js"></script>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+  "rapier": "https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.19.3/rapier.mjs"
+} }
+</script>
+</head>
+<body>
+<div id="loading">Cargando… <span id="loadPct">0%</span></div>
+
+<div id="menu" class="overlay">
+  <div class="panel">
+    <h1>PARTY<span>AMIGOS</span></h1>
+    <label>Tu nombre <input id="name" maxlength="12" autocomplete="off"></label>
+    <h3>Color principal</h3><div id="colors1" class="swatches"></div>
+    <h3>Segundo color</h3><div id="colors2" class="swatches"></div>
+    <h3>Estampado</h3><div id="patterns"></div>
+    <div id="joinBox" hidden style="margin-top:14px"><button id="btnJoin" class="primary big">Unirse a la sala <b id="joinCode"></b></button></div>
+    <div class="row">
+      <button id="btnSolo">Jugar con bots</button>
+      <button id="btnHost" class="primary">Crear sala online</button>
+    </div>
+    <details><summary>Tengo un código de sala</summary>
+      <div><input id="codeInput" maxlength="5" placeholder="ABCDE" autocomplete="off"><button id="btnCode">Unirse</button></div>
+    </details>
+    <label>Gráficos <select id="quality"><option value="ultra">Ultra</option><option value="alta">Altos</option><option value="baja">Rendimiento</option></select></label>
+    <p id="menuMsg" class="msg"></p>
+    <div class="controls">
+      <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd>: moverte · <kbd>Espacio</kbd>: saltar · <kbd>Shift</kbd> / <kbd>E</kbd>: lanzarte en plancha<br>
+      Ratón: mover la cámara (haz clic en el juego para fijarlo, <kbd>Esc</kbd> para soltarlo)<br>
+      Mando: stick izquierdo moverte, derecho cámara · A saltar · B/X plancha
+    </div>
+    <p class="hint" style="text-align:center">Cielo: Poly Haven (CC0)</p>
+  </div>
+</div>
+
+<div id="lobby" class="overlay" hidden>
+  <div class="panel">
+    <h2 id="lobbyTitle">Sala</h2>
+    <div id="linkBox">
+      <input id="link" readonly>
+      <button id="btnCopy" class="primary">Copiar enlace</button>
+      <p class="hint">Pásale este enlace a tus amigos: solo tienen que abrirlo en Chrome y pulsar «Unirse».</p>
+    </div>
+    <ul id="players"></ul>
+    <div id="hostOpts">
+      <label>Bots <input type="range" id="bots" min="0" max="15"> <b id="botsVal"></b></label>
+      <button id="btnStart" class="primary big">¡Empezar ronda!</button>
+    </div>
+    <p id="waitMsg" class="msg" hidden></p>
+    <div style="text-align:center"><button id="btnLeave" class="link">Salir</button></div>
+  </div>
+</div>
+
+<div id="hud" hidden>
+  <div id="players-count" class="sh"></div>
+  <div id="qual" class="sh"></div>
+  <div id="timer" class="sh"></div>
+  <div id="center" class="sh"></div>
+  <div id="hint" class="sh">Llega a la meta entre los primeros · Clic: controlar la cámara con el ratón</div>
+</div>
+
+<div id="touch" hidden>
+  <button id="tDive">PLANCHA</button><button id="tJump">SALTAR</button>
+</div>
+
+<div id="results" class="overlay" hidden>
+  <div class="panel">
+    <h2 id="resTitle"></h2>
+    <table id="resTable"></table>
+    <div class="row" id="resBtns"></div>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
