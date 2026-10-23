@@ -188,8 +188,10 @@ const IDLE = { mx: 0, mz: 0, jump: false, dive: false };
 // ---------- Simulación ----------
 let acc = 0, simT = 0;
 function simulate(dt, playerInp) {
+  // El tiempo de la simulación sigue al reloj común: corrección suave y salto si se desvía mucho (PC lento, pestaña en pausa…)
   const rt = raceTime();
-  if (Math.abs(simT - rt) > 0.25) simT = rt;
+  if (Math.abs(simT - rt) > 0.1) simT = rt;
+  else simT += (rt - simT) * 0.1;
   acc += dt;
   let steps = 0, first = true;
   while (acc >= STEP && steps < 4) {
@@ -620,6 +622,6 @@ function frame(now) {
   for (const o of hidden) o.visible = false;
   tmpBean.dispose();
 }
-if (new URLSearchParams(location.search).has('debug')) window.partyDebug = { game, course, physics, world, ranking, newBotMemory };
+if (new URLSearchParams(location.search).has('debug')) window.partyDebug = { game, course, physics, world, ranking, newBotMemory, net };
 hide('loading');
 requestAnimationFrame(frame);
