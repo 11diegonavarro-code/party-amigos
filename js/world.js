@@ -155,6 +155,10 @@ export async function createWorld(renderer, qualityName, onProgress) {
     scene, camera, quality: Q, composer, resize,
     render: () => (composer ? composer.render() : renderer.render(scene, camera)),
     setPixelRatio(pr) { renderer.setPixelRatio(pr); resize(); },
+    setSlime(color) {
+      slime.material.color.set(color);
+      slime.material.emissive.set(color).multiplyScalar(0.3);
+    },
     followSun(target) {
       sun.position.copy(target).addScaledVector(SUN, 120);
       sun.target.position.copy(target);

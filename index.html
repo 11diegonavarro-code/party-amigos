@@ -56,6 +56,8 @@
   #qual { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); font-size: 24px; background: #1b1440cc; padding: 8px 18px; border-radius: 14px; }
   #timer { position: absolute; top: 14px; right: 18px; font-size: 30px; font-variant-numeric: tabular-nums; }
   #players-count { position: absolute; top: 18px; left: 18px; font-size: 16px; opacity: .9; }
+  #mapName { position: absolute; top: 42px; left: 18px; font-size: 14px; opacity: .8; }
+  #place { position: absolute; bottom: 40px; right: 22px; font-size: 40px; }
   #center { position: absolute; inset: 0; display: grid; place-items: center; font-size: 96px; text-align: center; }
   #hint { position: absolute; left: 16px; bottom: 12px; font-size: 13px; font-weight: 600; opacity: .85; }
   #toast { position: fixed; top: 22%; left: 50%; transform: translate(-50%, 0); font-size: 30px; font-weight: 900; opacity: 0; pointer-events: none; z-index: 15; text-shadow: 0 3px 0 #0009, 0 0 12px #000a; }
@@ -101,7 +103,7 @@
     <label>Gráficos <select id="quality"><option value="ultra">Ultra</option><option value="alta">Altos</option><option value="baja">Rendimiento</option></select></label>
     <p id="menuMsg" class="msg"></p>
     <div class="controls">
-      <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd>: moverte · <kbd>Espacio</kbd>: saltar · <kbd>Shift</kbd> / <kbd>E</kbd>: lanzarte en plancha<br>
+      <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd>: moverte · <kbd>Espacio</kbd>: saltar · <kbd>Shift</kbd> / <kbd>E</kbd>: plancha (salta y planchea para llegar más lejos)<br>
       Ratón: mover la cámara (haz clic en el juego para fijarlo, <kbd>Esc</kbd> para soltarlo)<br>
       Mando: stick izquierdo moverte, derecho cámara · A saltar · B/X plancha
     </div>
@@ -119,9 +121,16 @@
     </div>
     <ul id="players"></ul>
     <div id="hostOpts">
+      <label>Mapa <select id="mapSel">
+        <option value="aleatorio">Aleatorio</option>
+        <option value="gominola">Carrera Gominola</option>
+        <option value="fabrica">Fábrica de Caramelos</option>
+        <option value="cumbre">Cumbre Merengue (difícil)</option>
+      </select></label>
       <label>Bots <input type="range" id="bots" min="0" max="15"> <b id="botsVal"></b></label>
       <button id="btnStart" class="primary big">¡Empezar ronda!</button>
     </div>
+    <p id="mapInfo" class="hint" style="text-align:center"></p>
     <p id="waitMsg" class="msg" hidden></p>
     <div style="text-align:center"><button id="btnLeave" class="link">Salir</button></div>
   </div>
@@ -129,6 +138,8 @@
 
 <div id="hud" hidden>
   <div id="players-count" class="sh"></div>
+  <div id="mapName" class="sh"></div>
+  <div id="place" class="sh"></div>
   <div id="qual" class="sh"></div>
   <div id="timer" class="sh"></div>
   <div id="center" class="sh"></div>

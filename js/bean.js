@@ -90,9 +90,11 @@ export function buildBean({ c1, c2, pattern, name, showLabel }) {
     // s: { x, y, z, q (cuaternión físico), yaw, vx, vy, vz, state, grounded }
     update(s, dt, time) {
       root.position.set(s.x, s.y, s.z);
-      if (s.state === 'tumble' && s.q) { tmpQ.set(s.q.x, s.q.y, s.q.z, s.q.w); orient.quaternion.slerp(tmpQ, Math.min(1, dt * 20)); }
+      // Volteretas y plancha: la orientación la da la física (en la plancha, tumbado boca abajo)
+      if ((s.state === 'tumble' || s.state === 'dive' || s.state === 'slide') && s.q) { tmpQ.set(s.q.x, s.q.y, s.q.z, s.q.w); orient.quaternion.slerp(tmpQ, Math.min(1, dt * 22)); }
       else { yawQ.setFromAxisAngle(up, s.yaw); orient.quaternion.slerp(yawQ, Math.min(1, dt * 14)); }
       blob.visible = s.grounded !== false;
+      blob.position.y = s.state === 'dive' || s.state === 'slide' ? -0.4 : -0.88; // tumbado, el centro está más bajo
 
       const speed = Math.hypot(s.vx, s.vz);
       const k = Math.min(1, dt * 14);
@@ -111,12 +113,12 @@ export function buildBean({ c1, c2, pattern, name, showLabel }) {
         lz = -2.3 + flail; rz = 2.3 - flail;
         ll = 0.5; rl = 0.3;
         squash = s.vy > 0 ? 1.06 : 0.98;
-      } else if (s.state === 'dive') {
-        pitch = 1.35;
-        la = ra = -2.9;
-        ll = rl = 0.2;
+      } else if (s.state === 'dive' || s.state === 'slide') {
+        // Brazos estirados por encima de la cabeza (que, tumbado, apuntan hacia delante) y piernas atrás
+        lz = -2.9; rz = 2.9;
+        ll = rl = s.state === 'slide' ? Math.sin(time * 18) * 0.25 : 0.3;
       } else if (s.state === 'getup') {
-        pitch = 0.6;
+        pitch = 0.35;
         la = ra = -1.2;
       } else if (s.state === 'tumble' || s.state === 'fallen') {
         la = Math.sin(time * 17) * 1.5; ra = Math.cos(time * 15) * 1.5;

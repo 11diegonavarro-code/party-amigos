@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import RAPIER from 'rapier';
 import { createWorld, QUALITY } from './world.js';
-import { Course } from './course.js';
+import { Course, MAPS } from './course.js';
 import { buildBean, PATTERNS } from './bean.js';
 import { Bean, botInput, newBotMemory, FOOT } from './player.js';
 import { FX } from './fx.js';
@@ -11,8 +11,8 @@ import { Net } from './net.js';
 const $ = id => document.getElementById(id);
 const COLORS = ['#ff5ca8', '#3d8bff', '#2ed47a', '#ffd23f', '#9b6bff', '#ff8f3d', '#00c2d1', '#ff4b4b', '#f5f5f5', '#2d3142'];
 const BOT_NAMES = ['Gomi', 'Pompón', 'Chuche', 'Regaliz', 'Nube', 'Pirueta', 'Burbuja', 'Gelatina', 'Piruleta', 'Caramelo', 'Malvavisco', 'Fresita', 'Bombón', 'Rosquilla', 'Turrón', 'Mazapán'];
-const STATES = ['idle', 'run', 'air', 'dive', 'getup', 'tumble', 'fallen', 'celebrate'];
-const STEP = 1 / 60, TIME_LIMIT = 180, MAX = 16, COUNTDOWN = 4.5;
+const STATES = ['idle', 'run', 'air', 'dive', 'getup', 'tumble', 'fallen', 'celebrate', 'slide'];
+const STEP = 1 / 60, TIME_LIMIT = 300, MAX = 16, COUNTDOWN = 4.5;
 const store = {
   get(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
   set(k, v) { try { localStorage.setItem(k, v); } catch { /* sin almacenamiento */ } },
@@ -35,7 +35,9 @@ await RAPIER.init();
 const physics = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
 physics.timestep = STEP;
 const course = new Course(world.scene, RAPIER, physics);
+course.load('gominola');
 course.reset(1);
+world.setSlime(course.pal.slime);
 const fx = new FX(world.scene, quality === 'baja' ? 220 : 420);
 const net = new Net();
 const sound = new Sound();
@@ -43,7 +45,7 @@ const sound = new Sound();
 const game = {
   phase: 'menu', beans: [], seed: 1, startAt: 0, qualifyN: 1, ended: false,
   me: { name: store.get('pa-name', 'Gominola' + Math.floor(Math.random() * 90 + 10)), c1: store.get('pa-c1', COLORS[0]), c2: store.get('pa-c2', COLORS[3]), pattern: store.get('pa-pattern', 'lunares') },
-  lobby: { players: [], bots: 9, racing: false },
+  lobby: { players: [], bots: 9, racing: false, map: 'aleatorio' },
 };
 let player = null;
 const raceTime = () => (net.hostNow() - game.startAt) / 1000;
@@ -59,10 +61,7 @@ function rebuildShowcase() {
 rebuildShowcase();
 
 // ---------- Gominolas ----------
-function gridSlot(i) {
-  const col = i % 6, row = Math.floor(i / 6);
-  return { x: -7.5 + col * 3, y: FOOT + 0.05, z: 3.5 + row * 3 };
-}
+const gridSlot = i => course.spawn(i);
 
 function spawnBean(r, i) {
   const s = gridSlot(i);
@@ -84,10 +83,13 @@ function clearBeans() {
   player = null;
 }
 
-function startRound(roster, seed, startAt) {
+function startRound(roster, seed, startAt, map) {
   clearBeans();
+  if (course.mapId !== map) { course.load(map); world.setSlime(course.pal.slime); }
   game.seed = seed;
   course.reset(seed);
+  $('mapName').textContent = MAPS[course.mapId].name;
+  big(MAPS[course.mapId].name, 1400);
   game.beans = roster.map(spawnBean);
   player = game.beans.find(b => b.isPlayer) || null;
   Object.assign(game, { startAt, phase: 'countdown', ended: false, qualifyN: roster.length === 1 ? 1 : Math.max(1, Math.ceil(roster.length * 0.6)) });
@@ -98,7 +100,7 @@ function startRound(roster, seed, startAt) {
   lastBeep = 99;
 }
 
-const progress = b => (b.finishTime != null ? 1e6 - b.finishTime : b.phys.cp * 1000 + b.view.z);
+const progress = b => (b.finishTime != null ? 1e6 - b.finishTime : b.view.z);
 const ranking = () => [...game.beans].sort((a, b) => progress(b) - progress(a));
 
 // ---------- Entrada ----------
@@ -179,9 +181,7 @@ function readInput(dt) {
   let mx = fx * fwd + rx * right, mz = fz * fwd + rz * right;
   const l = Math.hypot(mx, mz);
   if (l > 1) { mx /= l; mz /= l; }
-  const inp = { mx, mz, jump: jumpPressed, dive: divePressed };
-  jumpPressed = divePressed = false;
-  return inp;
+  return { mx, mz };
 }
 const IDLE = { mx: 0, mz: 0, jump: false, dive: false };
 
@@ -193,7 +193,7 @@ function simulate(dt, playerInp) {
   if (Math.abs(simT - rt) > 0.1) simT = rt;
   else simT += (rt - simT) * 0.1;
   acc += dt;
-  let steps = 0, first = true;
+  let steps = 0;
   while (acc >= STEP && steps < 4) {
     simT += STEP;
     course.stepKinematics(simT);
@@ -203,7 +203,7 @@ function simulate(dt, playerInp) {
       let inp = IDLE;
       if (racing && !b.finishTime) {
         if (b.bot) inp = botInput(b.phys, course, simT, b.mem, STEP);
-        else if (b.isPlayer) inp = first ? playerInp : { ...playerInp, jump: false, dive: false };
+        else if (b.isPlayer) { inp = { ...playerInp, jump: jumpPressed, dive: divePressed }; jumpPressed = divePressed = false; }
       }
       b.phys.control(inp, STEP);
     }
@@ -211,19 +211,19 @@ function simulate(dt, playerInp) {
     for (const b of game.beans) {
       if (!b.owned) continue;
       b.phys.post(STEP, course);
-      const p = b.phys.pos;
-      const d = course.doorAt(p);
-      if (d && d.door.real && course.breakDoor(d.w, d.d)) { net.send({ t: 'door', w: d.w, d: d.d }); onDoorBroken(d.door); }
+      // Puertas que se rompen al tocarlas y baldosas que se caen al pisarlas: se avisa a los demás
+      const ev = course.touch(b.phys.pos) || (b.phys.grounded && b.phys.groundCollider ? course.ground(b.phys.groundCollider, simT) : null);
+      if (ev) { net.send({ t: 'cev', ...ev }); if (ev.k === 'door') onDoorBroken(ev); }
       handleEvents(b);
     }
-    acc -= STEP; steps++; first = false;
+    acc -= STEP; steps++;
   }
   if (steps === 4) acc = 0;
 }
 
-function onDoorBroken(door) {
-  fx.dust(door.x, 1.5, door.mesh.position.z);
-  if (player && Math.abs(player.view.z - door.mesh.position.z) < 25) sound.sfx('door');
+function onDoorBroken(e) {
+  fx.dust(e.x, 1.5, e.z);
+  if (player && Math.abs(player.view.z - e.z) < 25) sound.sfx('door');
 }
 
 function handleEvents(b) {
@@ -298,7 +298,7 @@ net.on('leave', m => {
   game.beans = game.beans.filter(b => b.owner !== m.from || b.bot);
 });
 net.on('lobby', m => { if (!net.host) { game.lobby = m.lobby; renderLobby(); } });
-net.on('start', m => { if (!net.host) startRound(m.roster, m.seed, m.startAt); });
+net.on('start', m => { if (!net.host) startRound(m.roster, m.seed, m.startAt, m.map); });
 net.on('tolobby', () => { if (!net.host) showLobby(); });
 net.on('st', m => {
   const now = performance.now();
@@ -309,7 +309,7 @@ net.on('st', m => {
     if (b.buf.length > 12) b.buf.shift();
   }
 });
-net.on('door', m => { const door = course.doorWalls[m.w]?.doors[m.d]; if (course.breakDoor(m.w, m.d)) onDoorBroken(door); });
+net.on('cev', m => { const r = course.remote(m); if (r && m.k === 'door') onDoorBroken(r); });
 net.on('fin', m => {
   const b = game.beans.find(x => x.id === m.id);
   if (b && b.finishTime == null) { b.finishTime = m.time; onFinish(b); }
@@ -330,8 +330,13 @@ function hostStart() {
   const roster = [...humans, ...bots].sort(() => Math.random() - 0.5);
   const seed = Math.floor(Math.random() * 2 ** 31);
   const startAt = net.hostNow() + COUNTDOWN * 1000;
-  net.send({ t: 'start', roster, seed, startAt });
-  startRound(roster, seed, startAt);
+  // Mapa elegido en la sala, o uno al azar distinto del anterior
+  const ids = Object.keys(MAPS);
+  let map = L.map;
+  if (!MAPS[map]) { const others = ids.filter(id => id !== game.map); map = others[Math.floor(Math.random() * others.length)]; }
+  game.map = map;
+  net.send({ t: 'start', roster, seed, startAt, map });
+  startRound(roster, seed, startAt, map);
 }
 
 function endRound() {
@@ -410,6 +415,8 @@ function renderLobby() {
   $('waitMsg').hidden = hosting;
   $('waitMsg').textContent = L.racing ? 'Hay una ronda en curso: entrarás en la siguiente.' : 'Esperando a que el anfitrión empiece…';
   $('bots').value = L.bots; $('botsVal').textContent = L.bots;
+  $('mapSel').value = MAPS[L.map] ? L.map : 'aleatorio';
+  $('mapInfo').textContent = hosting ? '' : `Mapa: ${MAPS[L.map]?.name || 'aleatorio'}`;
 }
 function showLobby() {
   clearBeans();
@@ -488,7 +495,7 @@ swatches('colors1', 'c1'); swatches('colors2', 'c2'); patternButtons();
 setupMenu();
 $('btnSolo').onclick = () => {
   readMe(); net.close();
-  game.lobby = { players: [{ pid: 'solo', ...game.me }], bots: 11, racing: false };
+  game.lobby = { players: [{ pid: 'solo', ...game.me }], bots: 11, racing: false, map: game.lobby.map || 'aleatorio' };
   showLobby();
 };
 $('btnHost').onclick = async () => {
@@ -496,7 +503,7 @@ $('btnHost').onclick = async () => {
   try {
     await net.createRoom();
     setMsg('');
-    game.lobby = { players: [{ pid: 'H', ...game.me }], bots: 7, racing: false };
+    game.lobby = { players: [{ pid: 'H', ...game.me }], bots: 7, racing: false, map: 'aleatorio' };
     history.replaceState(null, '', `#${net.code}`);
     showLobby();
   } catch (e) { setMsg('No se pudo crear la sala: ' + (e.message || e)); }
@@ -509,6 +516,7 @@ $('btnCopy').onclick = async () => {
 };
 $('btnLeave').onclick = goMenu;
 $('bots').oninput = e => { game.lobby.bots = +e.target.value; broadcastLobby(); };
+$('mapSel').onchange = e => { game.lobby.map = e.target.value; broadcastLobby(); };
 $('btnStart').onclick = hostStart;
 
 // ---------- Cámara ----------
@@ -561,8 +569,8 @@ function drawHud() {
   const done = game.beans.filter(b => b.finishTime != null).length;
   $('qual').textContent = `Clasificados ${Math.min(done, game.qualifyN)} / ${game.qualifyN}`;
   $('timer').textContent = fmt(TIME_LIMIT - Math.max(0, raceTime()));
-  const others = game.beans.length - 1;
-  $('players-count').textContent = `${others + 1} gominolas`;
+  $('players-count').textContent = `${game.beans.length} gominolas`;
+  if (player) $('place').textContent = player.finishTime != null ? '¡En la meta!' : `Vas ${ranking().indexOf(player) + 1}º`;
 }
 
 // ---------- Bucle ----------
@@ -578,6 +586,7 @@ function frame(now) {
       const n = Math.ceil(-rt);
       if (n !== lastBeep && n <= 3 && n >= 1) { lastBeep = n; big(String(n), 900); sound.sfx('beep'); }
       if (rt >= 0) { game.phase = 'race'; big('¡YA!', 900); sound.sfx('go'); }
+      jumpPressed = divePressed = false; // nada de saltos guardados antes de la salida
     }
     const inp = player && !player.finishTime && game.phase === 'race' ? readInput(dt) : (readInput(dt), IDLE);
     for (const b of game.beans) if (!b.owned) interpolateRemote(b, now);
@@ -586,7 +595,7 @@ function frame(now) {
     for (const b of game.beans) {
       if (b.owned) {
         const p = b.phys.pos, v = b.phys.vel, q = b.phys.body.rotation();
-        Object.assign(b.view, { x: p.x, y: p.y, z: p.z, q, yaw: b.phys.yaw, vx: v.x, vy: v.y, vz: v.z, state: b.phys.state, grounded: b.phys.grounded });
+        Object.assign(b.view, { x: p.x + v.x * acc, y: p.y + v.y * acc, z: p.z + v.z * acc, q, yaw: b.phys.yaw, vx: v.x, vy: v.y, vz: v.z, state: b.phys.state, grounded: b.phys.grounded });
       }
       if (b.view.grounded && !b.wasGrounded && b.view.vy < -6) fx.dust(b.view.x, b.view.y - FOOT, b.view.z);
       b.wasGrounded = b.view.grounded;
@@ -604,7 +613,7 @@ function frame(now) {
     }
     menuCamera(dt);
   }
-  course.syncVisuals(inRound() ? simT : time, dt);
+  course.syncVisuals(inRound() ? simT + acc : time, dt);
   world.update(dt, time);
   fx.update(dt);
   world.render();
