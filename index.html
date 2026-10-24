@@ -36,9 +36,11 @@
   .swatches { display: flex; flex-wrap: wrap; gap: 7px; }
   .swatch { width: 28px; height: 28px; padding: 0; border-radius: 50%; border: 3px solid transparent; }
   .swatch.on { border-color: #fff; box-shadow: 0 0 0 2px #0008; }
-  #patterns { display: flex; gap: 6px; flex-wrap: wrap; }
-  #patterns button { padding: 6px 10px; font-size: 13px; border-radius: 10px; }
-  #patterns button.on { background: var(--accent); border-color: transparent; }
+  .opts { display: flex; gap: 6px; flex-wrap: wrap; }
+  .opts button { padding: 6px 10px; font-size: 13px; border-radius: 10px; }
+  .opts button.on { background: var(--accent); border-color: transparent; }
+  .opts button:disabled { opacity: .45; cursor: not-allowed; }
+  #crownCount { float: right; color: var(--accent2); }
   details { margin: 6px 0; color: var(--muted); }
   details > div { display: flex; gap: 8px; margin-top: 8px; }
   details input { flex: 1; text-transform: uppercase; letter-spacing: 3px; }
@@ -58,7 +60,13 @@
   #players-count { position: absolute; top: 18px; left: 18px; font-size: 16px; opacity: .9; }
   #mapName { position: absolute; top: 42px; left: 18px; font-size: 14px; opacity: .8; }
   #place { position: absolute; bottom: 40px; right: 22px; font-size: 40px; }
-  #center { position: absolute; inset: 0; display: grid; place-items: center; font-size: 96px; text-align: center; }
+  #center { position: absolute; inset: 0; display: grid; place-items: center; font-size: 84px; text-align: center; white-space: pre-line; line-height: 1.05; }
+  #spectate { position: absolute; bottom: 44px; left: 50%; transform: translateX(-50%); font-size: 18px; background: #1b1440cc; padding: 8px 16px; border-radius: 12px; }
+  #resNext { text-align: center; color: var(--accent2); font-weight: 800; margin: 10px 0 0; }
+  #crown { background: radial-gradient(ellipse at center, #0000 0%, #0006 100%); place-items: end center; padding-bottom: 6vh; }
+  #crown .panel { text-align: center; }
+  #crownName { font-size: 34px; margin: 0 0 4px; }
+  #crownSub { color: var(--accent2); font-weight: 800; min-height: 1.2em; margin: 0 0 6px; }
   #hint { position: absolute; left: 16px; bottom: 12px; font-size: 13px; font-weight: 600; opacity: .85; }
   #toast { position: fixed; top: 22%; left: 50%; transform: translate(-50%, 0); font-size: 30px; font-weight: 900; opacity: 0; pointer-events: none; z-index: 15; text-shadow: 0 3px 0 #0009, 0 0 12px #000a; }
   #toast.on { animation: toast 2s ease-out; }
@@ -69,7 +77,7 @@
   #results .panel { width: min(520px, 100%); }
   #touch { position: fixed; inset: 0; pointer-events: none; z-index: 6; }
   #touch button { position: absolute; pointer-events: auto; width: 84px; height: 84px; border-radius: 50%; font-size: 15px; background: #0006; border: 2px solid #ffffff55; }
-  #tJump { right: 22px; bottom: 34px; } #tDive { right: 118px; bottom: 34px; }
+  #tJump { right: 22px; bottom: 34px; } #tDive { right: 118px; bottom: 34px; } #tGrab { right: 70px; bottom: 128px; }
   @media (max-width: 760px) { #menu, #lobby { place-items: end center; padding: 12px; } .panel { max-height: 62vh; } #center { font-size: 56px; } }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
@@ -91,7 +99,9 @@
     <label>Tu nombre <input id="name" maxlength="12" autocomplete="off"></label>
     <h3>Color principal</h3><div id="colors1" class="swatches"></div>
     <h3>Segundo color</h3><div id="colors2" class="swatches"></div>
-    <h3>Estampado</h3><div id="patterns"></div>
+    <h3>Estampado</h3><div id="patterns" class="opts"></div>
+    <h3>Sombrero <span id="crownCount"></span></h3><div id="hats" class="opts"></div>
+    <h3>Cara</h3><div id="faces" class="opts"></div>
     <div id="joinBox" hidden style="margin-top:14px"><button id="btnJoin" class="primary big">Unirse a la sala <b id="joinCode"></b></button></div>
     <div class="row">
       <button id="btnSolo">Jugar con bots</button>
@@ -103,9 +113,10 @@
     <label>Gráficos <select id="quality"><option value="ultra">Ultra</option><option value="alta">Altos</option><option value="baja">Rendimiento</option></select></label>
     <p id="menuMsg" class="msg"></p>
     <div class="controls">
-      <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd>: moverte · <kbd>Espacio</kbd>: saltar · <kbd>Shift</kbd> / <kbd>E</kbd>: plancha (salta y planchea para llegar más lejos)<br>
+      <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd>: moverte · <kbd>Espacio</kbd>: saltar · <kbd>Shift</kbd> / <kbd>E</kbd>: plancha (salta y planchea para llegar más lejos) · <kbd>F</kbd> / clic izquierdo (mantener): agarrar<br>
       Ratón: mover la cámara (haz clic en el juego para fijarlo, <kbd>Esc</kbd> para soltarlo)<br>
-      Mando: stick izquierdo moverte, derecho cámara · A saltar · B/X plancha
+      Mando: stick izquierdo moverte, derecho cámara · A saltar · B/X plancha · RT/RB agarrar<br>
+      Eliminado: <kbd>←</kbd> <kbd>→</kbd> o clic para mirar a otros jugadores
     </div>
     <p class="hint" style="text-align:center">Cielo: Poly Haven (CC0)</p>
   </div>
@@ -121,11 +132,19 @@
     </div>
     <ul id="players"></ul>
     <div id="hostOpts">
-      <label>Mapa <select id="mapSel">
+      <label>Modo <select id="modeSel">
+        <option value="show">Show: eliminatorias hasta la corona</option>
+        <option value="single">Ronda suelta</option>
+      </select></label>
+      <label id="mapRow">Mapa <select id="mapSel">
         <option value="aleatorio">Aleatorio</option>
         <option value="gominola">Carrera Gominola</option>
         <option value="fabrica">Fábrica de Caramelos</option>
         <option value="cumbre">Cumbre Merengue (difícil)</option>
+        <option value="suelo">Suelo de Gominola (supervivencia)</option>
+        <option value="comba">Salta la Comba (supervivencia)</option>
+        <option value="derrumbe">Final: Derrumbe</option>
+        <option value="corona">Final: Cumbre de la Corona</option>
       </select></label>
       <label>Bots <input type="range" id="bots" min="0" max="15"> <b id="botsVal"></b></label>
       <button id="btnStart" class="primary big">¡Empezar ronda!</button>
@@ -143,18 +162,28 @@
   <div id="qual" class="sh"></div>
   <div id="timer" class="sh"></div>
   <div id="center" class="sh"></div>
-  <div id="hint" class="sh">Llega a la meta entre los primeros · Clic: controlar la cámara con el ratón</div>
+  <div id="spectate" class="sh" hidden></div>
+  <div id="hint" class="sh">Clic: controlar la cámara con el ratón · F o clic izquierdo: agarrar</div>
 </div>
 
 <div id="touch" hidden>
-  <button id="tDive">PLANCHA</button><button id="tJump">SALTAR</button>
+  <button id="tGrab">AGARRAR</button><button id="tDive">PLANCHA</button><button id="tJump">SALTAR</button>
 </div>
 
 <div id="results" class="overlay" hidden>
   <div class="panel">
     <h2 id="resTitle"></h2>
     <table id="resTable"></table>
+    <p id="resNext"></p>
     <div class="row" id="resBtns"></div>
+  </div>
+</div>
+
+<div id="crown" class="overlay" hidden>
+  <div class="panel">
+    <h2 id="crownName"></h2>
+    <p id="crownSub"></p>
+    <div class="row" id="crownBtns"></div>
   </div>
 </div>
 <div id="toast"></div>

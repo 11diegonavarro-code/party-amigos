@@ -3,7 +3,7 @@ import { SLIME_Y } from './course.js';
 
 export const RADIUS = 0.42, HALF = 0.48, FOOT = HALF + RADIUS;
 const RUN = 6.4, ACC_GROUND = 50, ACC_AIR = 16, JUMP = 7.4, GRAVITY_SCALE = 2;
-const DIVE = 11, DIVE_UP = 3.2;
+const DIVE = 11, DIVE_UP = 1.6; // desde el suelo, plancha rasante (pasa por debajo de la barra alta)
 const ZERO = { x: 0, y: 0, z: 0 };
 const wrap = a => Math.atan2(Math.sin(a), Math.cos(a));
 const UPRIGHT = { x: 0, y: 0, z: 0, w: 1 };
@@ -25,7 +25,8 @@ export class Bean {
     );
     Object.assign(this, {
       state: 'idle', stateT: 0, yaw, grounded: true, coyote: 0, jumpBuf: 0, platformVel: ZERO, expected: null,
-      groundCollider: null, groundY: null, cp: 0, finished: false, events: [],
+      groundCollider: null, groundColliders: [], groundY: null, cp: 0, finished: false, events: [],
+      grabbing: null, grabbedBy: null, // grabbedBy(): posición de quien nos agarra (o null)
     });
   }
 
@@ -64,13 +65,20 @@ export class Bean {
     }
 
     const moving = Math.hypot(inp.mx, inp.mz) > 0.2;
-    const wantX = inp.mx * RUN * (inp.speed ?? 1) + pv.x, wantZ = inp.mz * RUN * (inp.speed ?? 1) + pv.z;
+    // Agarrar frena a los dos; al agarrado además le arrastra quien le agarra
+    const held = this.grabbedBy?.();
+    const mul = (inp.speed ?? 1) * (held ? 0.3 : 1) * (this.grabbing ? 0.6 : 1);
+    let wantX = inp.mx * RUN * mul + pv.x, wantZ = inp.mz * RUN * mul + pv.z;
+    if (held) {
+      const p = this.body.translation(), gx = held.x - p.x, gz = held.z - p.z, gd = Math.hypot(gx, gz);
+      if (gd > 1.2) { wantX += (gx / gd) * 2.6; wantZ += (gz / gd) * 2.6; }
+    }
     const acc = (this.grounded ? ACC_GROUND : ACC_AIR) * dt;
     const dx = wantX - v.x, dz = wantZ - v.z, d = Math.hypot(dx, dz);
     if (d > acc) { nx = v.x + (dx / d) * acc; nz = v.z + (dz / d) * acc; } else { nx = wantX; nz = wantZ; }
     if (moving) this.yaw += wrap(Math.atan2(inp.mx, inp.mz) - this.yaw) * Math.min(1, dt * 12);
 
-    if (this.jumpBuf > 0 && (this.grounded || this.coyote > 0)) {
+    if (this.jumpBuf > 0 && (this.grounded || this.coyote > 0) && !held && !this.grabbing) {
       ny = JUMP + Math.max(0, pv.y || 0);
       this.jumpBuf = 0; this.coyote = 0; this.grounded = false;
       this.setState('air');
@@ -82,7 +90,10 @@ export class Bean {
       const fx = Math.sin(this.yaw), fz = Math.cos(this.yaw);
       nx = fx * DIVE + pv.x * 0.5; nz = fz * DIVE + pv.z * 0.5;
       ny = this.grounded ? DIVE_UP : Math.max(ny, 1.2);
+      // Desde el suelo se tumba a ras de suelo; en el aire, donde está
+      if (this.grounded && this.groundY != null) { const p = this.body.translation(); this.body.setTranslation({ x: p.x, y: this.groundY + RADIUS + 0.04, z: p.z }, true); }
       this.grounded = false;
+      this.grabbing = null;
       this.body.setRotation(lyingQuat(this.yaw), true);
       this.setState('dive');
       this.events.push('dive');
@@ -94,8 +105,16 @@ export class Bean {
   // Después del paso de física: suelo, golpes, estados y caídas a la baba
   post(dt, course) {
     const R = this.R, p = this.body.translation(), v = this.body.linvel();
-    const ray = new R.Ray({ x: p.x, y: p.y, z: p.z }, { x: 0, y: -1, z: 0 });
-    const hit = this.world.castRay(ray, FOOT + 0.15, true, undefined, undefined, undefined, this.body);
+    // Cinco rayos (centro y cuatro alrededor) para no "colarse" por las juntas entre baldosas
+    let hit = null, ray = null;
+    this.groundColliders = [];
+    for (const [ox, oz] of [[0, 0], [0.25, 0], [-0.25, 0], [0, 0.25], [0, -0.25]]) {
+      const r = new R.Ray({ x: p.x + ox, y: p.y, z: p.z + oz }, { x: 0, y: -1, z: 0 });
+      const h = this.world.castRay(r, FOOT + 0.15, true, undefined, undefined, undefined, this.body);
+      if (!h) continue;
+      this.groundColliders.push(h.collider);
+      if (!hit || h.timeOfImpact < hit.timeOfImpact - 0.05) { hit = h; ray = r; }
+    }
     this.grounded = !!hit && v.y < 5;
     this.groundY = hit ? p.y - hit.timeOfImpact : null;
     this.groundCollider = hit ? hit.collider : null;
@@ -138,7 +157,7 @@ export class Bean {
     }
 
     if (p.y < SLIME_Y + 1 && this.state !== 'fallen') { this.setState('fallen'); this.events.push('splash'); }
-    if (this.state === 'fallen' && this.stateT > 0.9) this.respawn(course);
+    if (this.state === 'fallen' && this.stateT > 0.9 && !course.noRespawn) this.respawn(course);
 
     for (let i = this.cp + 1; i < course.checkpoints.length; i++) if (p.z > course.checkpoints[i].z - 1 && p.y > course.checkpoints[i].y - 1) { this.cp = i; this.events.push('checkpoint'); }
     if (!this.finished && p.z > course.finishZ && p.y > course.finishY) { this.finished = true; this.events.push('finish'); }
@@ -197,11 +216,11 @@ export function botInput(bean, course, t, mem, dt) {
   mem.jumpCd -= dt;
 
   // Cada sección sabe cómo se supera: hacia dónde ir, cuándo saltar o esperar
-  const plan = { tx: mem.lane, tz: p.z + 8, jump: false, wait: false, longGap: false, doorKey: null };
+  const plan = { tx: mem.lane, tz: p.z + 8, jump: false, dive: false, wait: false, longGap: false, noStuck: false };
   course.sectionAt(p.z)?.ai?.(plan, { p, v, t, mem, bean, grounded: bean.grounded, dt });
 
   // Atasco: si no avanza, salta y cambia de carril (y si estaba ante una puerta, la apunta como falsa)
-  if (p.z > mem.lastZ + 0.6) { mem.lastZ = p.z; mem.stuckT = 0; } else if (!plan.wait) mem.stuckT += dt;
+  if (p.z > mem.lastZ + 0.6) { mem.lastZ = p.z; mem.stuckT = 0; } else if (!plan.wait && !plan.noStuck) mem.stuckT += dt;
   if (mem.stuckT > 1.4) {
     if (mem.door) mem.fake.add(mem.door);
     mem.door = null;
@@ -213,10 +232,12 @@ export function botInput(bean, course, t, mem, dt) {
   // En el aire tras saltar un hueco largo: plancha al llegar arriba para llegar más lejos
   if (mem.diveArmed && !bean.grounded && bean.state === 'air' && v.y < 1.2) { inp.dive = true; mem.diveArmed = false; }
   if (bean.grounded && bean.state !== 'air') mem.diveArmed = false;
+  if (plan.speed) inp.speed *= plan.speed;
   if (plan.wait && bean.grounded) return inp;
 
   const dx = plan.tx - p.x, dz = plan.tz - p.z, l = Math.hypot(dx, dz) || 1;
   inp.mx = dx / l; inp.mz = dz / l;
+  if (plan.dive && bean.grounded && !bean.busy) inp.dive = true;
 
   // Hueco justo delante: salta en el borde (y arma la plancha si el hueco es largo)
   const hs = Math.hypot(v.x, v.z);

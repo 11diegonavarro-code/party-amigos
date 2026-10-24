@@ -2,6 +2,8 @@
 import * as THREE from 'three';
 
 export const PATTERNS = ['liso', 'rayas', 'lunares', 'mitad'];
+export const HATS = [['nada', 'Nada'], ['fiesta', 'Fiesta'], ['gato', 'Gato'], ['antena', 'Antena'], ['lazo', 'Lazo'], ['vikingo', 'Vikingo'], ['corona', 'Corona']];
+export const FACES = [['normal', 'Normal'], ['feliz', 'Contenta'], ['gafas', 'Gafas']];
 
 function patternTexture(c1, c2, pattern) {
   const c = document.createElement('canvas');
@@ -46,9 +48,98 @@ const shadowTex = (() => {
 })();
 const white = new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.2, clearcoat: 1 });
 const black = new THREE.MeshPhysicalMaterial({ color: 0x111111, roughness: 0.1, clearcoat: 1 });
+const blushMat = new THREE.MeshBasicMaterial({ color: 0xff7aa8, transparent: true, opacity: 0.6 });
+const gold = new THREE.MeshPhysicalMaterial({ color: 0xffc23d, metalness: 1, roughness: 0.22, emissive: 0x3a2400 });
+const metal = new THREE.MeshPhysicalMaterial({ color: 0xb8bec8, metalness: 0.9, roughness: 0.3 });
+const ivory = new THREE.MeshPhysicalMaterial({ color: 0xf3ead2, roughness: 0.5, clearcoat: 0.4 });
 const lerp = (a, b, t) => a + (b - a) * t;
 
-export function buildBean({ c1, c2, pattern, name, showLabel }) {
+function stripedTexture(c1, c2) {
+  const c = document.createElement('canvas');
+  c.width = 64; c.height = 64;
+  const g = c.getContext('2d');
+  g.fillStyle = c1; g.fillRect(0, 0, 64, 64);
+  g.fillStyle = c2;
+  for (let y = 0; y < 64; y += 16) g.fillRect(0, y, 64, 8);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+// Cara: ojos normales, contentos (^ ^) o con gafas de sol. Todo mirando hacia +z
+function buildFace(pose, face, add) {
+  if (face === 'feliz') {
+    for (const s of [-1, 1]) {
+      add(pose, new THREE.TorusGeometry(0.075, 0.02, 6, 16, Math.PI), black, s * 0.14, 0.4, 0.39);
+      const blush = add(pose, new THREE.CircleGeometry(0.065, 16), blushMat, s * 0.24, 0.29, 0.37);
+      blush.rotation.y = s * 0.55;
+      blush.castShadow = false;
+    }
+    return;
+  }
+  for (const s of [-1, 1]) {
+    const eye = add(pose, new THREE.SphereGeometry(0.12, 16, 12), white, s * 0.14, 0.43, 0.33);
+    eye.scale.set(1, 1.15, 0.6);
+    add(pose, new THREE.SphereGeometry(0.06, 12, 10), black, s * 0.13, 0.42, 0.405);
+    add(pose, new THREE.SphereGeometry(0.018, 8, 6), white, s * 0.11, 0.46, 0.46);
+  }
+  if (face === 'gafas') {
+    for (const s of [-1, 1]) {
+      const lens = add(pose, new THREE.SphereGeometry(0.135, 20, 12), black, s * 0.14, 0.43, 0.38);
+      lens.scale.set(1.1, 0.8, 0.35);
+    }
+    add(pose, new THREE.CylinderGeometry(0.015, 0.015, 0.1, 6).rotateZ(Math.PI / 2), black, 0, 0.45, 0.43);
+  }
+}
+
+// Sombreros, colocados sobre la cabeza (la cápsula termina en y = 0,9)
+function buildHat(pose, hat, c1, c2, add) {
+  if (!hat || hat === 'nada') return;
+  const g = new THREE.Group();
+  g.position.y = 0.84;
+  pose.add(g);
+  if (hat === 'fiesta') {
+    const cone = add(g, new THREE.ConeGeometry(0.2, 0.55, 24), new THREE.MeshPhysicalMaterial({ map: stripedTexture(c2, '#ffffff'), roughness: 0.4, clearcoat: 0.6 }), 0.04, 0.3, 0);
+    cone.rotation.z = -0.18;
+    add(g, new THREE.SphereGeometry(0.075, 12, 10), white, 0.09, 0.58, 0);
+  } else if (hat === 'gato') {
+    const inner = new THREE.MeshPhysicalMaterial({ color: 0xff9ec4, roughness: 0.5 });
+    const fur = new THREE.MeshPhysicalMaterial({ color: c1, roughness: 0.4, clearcoat: 0.5 });
+    for (const s of [-1, 1]) {
+      const ear = add(g, new THREE.ConeGeometry(0.13, 0.3, 4), fur, s * 0.21, 0.05, 0);
+      ear.rotation.set(0, Math.PI / 4, -s * 0.38);
+      const inEar = add(g, new THREE.ConeGeometry(0.075, 0.2, 4), inner, s * 0.205, 0.04, 0.04);
+      inEar.rotation.set(0, Math.PI / 4, -s * 0.38);
+    }
+  } else if (hat === 'antena') {
+    add(g, new THREE.CylinderGeometry(0.015, 0.015, 0.36, 6), metal, 0, 0.18, 0);
+    add(g, new THREE.SphereGeometry(0.075, 14, 10), new THREE.MeshStandardMaterial({ color: 0xffe14d, emissive: 0xffc400, emissiveIntensity: 1.4 }), 0, 0.38, 0);
+  } else if (hat === 'lazo') {
+    const ribbon = new THREE.MeshPhysicalMaterial({ color: c2, roughness: 0.35, clearcoat: 0.8 });
+    for (const s of [-1, 1]) {
+      const loop = add(g, new THREE.ConeGeometry(0.1, 0.22, 16), ribbon, s * 0.13, 0.02, 0.05);
+      loop.rotation.z = s * Math.PI / 2;
+      loop.scale.set(1, 1, 0.55);
+    }
+    add(g, new THREE.SphereGeometry(0.055, 12, 10), ribbon, 0, 0.02, 0.05);
+  } else if (hat === 'vikingo') {
+    add(g, new THREE.SphereGeometry(0.44, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2.6), metal, 0, -0.18, 0);
+    for (const s of [-1, 1]) {
+      const horn = add(g, new THREE.ConeGeometry(0.07, 0.34, 12), ivory, s * 0.38, 0.06, 0);
+      horn.rotation.z = -s * 0.95;
+    }
+  } else if (hat === 'corona') {
+    add(g, new THREE.CylinderGeometry(0.25, 0.23, 0.16, 28, 1, true), gold, 0, 0.06, 0).material.side = THREE.DoubleSide;
+    for (let k = 0; k < 5; k++) {
+      const a = (k / 5) * Math.PI * 2;
+      add(g, new THREE.ConeGeometry(0.055, 0.16, 10), gold, Math.sin(a) * 0.24, 0.21, Math.cos(a) * 0.24);
+      add(g, new THREE.SphereGeometry(0.03, 8, 6), gold, Math.sin(a) * 0.24, 0.3, Math.cos(a) * 0.24);
+    }
+    add(g, new THREE.SphereGeometry(0.04, 10, 8), new THREE.MeshPhysicalMaterial({ color: 0xff2a4a, roughness: 0.1, clearcoat: 1 }), 0, 0.06, 0.245);
+  }
+}
+
+export function buildBean({ c1, c2, pattern, name, showLabel, hat = 'nada', face = 'normal' }) {
   const root = new THREE.Group(), orient = new THREE.Group(), pose = new THREE.Group();
   root.add(orient); orient.add(pose);
   const skin = new THREE.MeshPhysicalMaterial({ map: patternTexture(c1, c2, pattern), roughness: 0.38, clearcoat: 0.7, clearcoatRoughness: 0.2, envMapIntensity: 0.9 });
@@ -56,13 +147,8 @@ export function buildBean({ c1, c2, pattern, name, showLabel }) {
   const add = (parent, geo, mat, x, y, z) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.castShadow = true; parent.add(m); return m; };
 
   add(pose, new THREE.CapsuleGeometry(0.42, 0.96, 10, 24), skin, 0, 0, 0);
-  // Ojos mirando hacia +z (delante)
-  for (const s of [-1, 1]) {
-    const eye = add(pose, new THREE.SphereGeometry(0.12, 16, 12), white, s * 0.14, 0.43, 0.33);
-    eye.scale.set(1, 1.15, 0.6);
-    add(pose, new THREE.SphereGeometry(0.06, 12, 10), black, s * 0.13, 0.42, 0.405);
-    add(pose, new THREE.SphereGeometry(0.018, 8, 6), white, s * 0.11, 0.46, 0.46);
-  }
+  buildFace(pose, face, add);
+  buildHat(pose, hat, c1, c2, add);
   // Brazos y piernas con pivote en el hombro y la cadera
   const joint = (x, y) => { const g = new THREE.Group(); g.position.set(x, y, 0); pose.add(g); return g; };
   const arms = [-1, 1].map(s => {
@@ -128,6 +214,9 @@ export function buildBean({ c1, c2, pattern, name, showLabel }) {
         lz = -2.6 + Math.sin(time * 9) * 0.35; rz = 2.6 - Math.sin(time * 9 + 1) * 0.35;
         bob = Math.abs(Math.sin(time * 5)) * 0.35;
       }
+      // Agarrando: brazos al frente. Agarrado: se revuelve
+      if (s.grabbing && (s.state === 'run' || s.state === 'idle' || s.state === 'air')) { la = ra = -1.5; lz = -0.1; rz = 0.1; }
+      else if (s.grabbed && (s.state === 'run' || s.state === 'idle')) { la = Math.sin(time * 20) * 1.2; ra = -la; lz = -0.9; rz = 0.9; }
       arms[0].rotation.x = lerp(arms[0].rotation.x, la, k); arms[1].rotation.x = lerp(arms[1].rotation.x, ra, k);
       arms[0].rotation.z = lerp(arms[0].rotation.z, lz, k); arms[1].rotation.z = lerp(arms[1].rotation.z, rz, k);
       legs[0].rotation.x = lerp(legs[0].rotation.x, ll, k); legs[1].rotation.x = lerp(legs[1].rotation.x, rl, k);

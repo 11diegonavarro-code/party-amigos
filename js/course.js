@@ -27,7 +27,7 @@ const PALETTES = {
 const LOW = 0.55, HIGH = 2.3;
 export const MAPS = {
   gominola: {
-    name: 'Carrera Gominola', palette: 'pastel', sections: [
+    name: 'Carrera Gominola', kind: 'race', palette: 'pastel', sections: [
       ['start'], ['doors', { rows: 3 }],
       ['sweepers', { discs: [[[LOW, 1.25]], [[LOW, -1.55], [HIGH, 0.9]]] }],
       ['gaps', { count: 4, gap: 3.2 }], ['seesaws', { count: 3 }], ['hammers', { count: 6, speed: 1.85 }],
@@ -35,13 +35,13 @@ export const MAPS = {
     ],
   },
   fabrica: {
-    name: 'Fábrica de Caramelos', palette: 'fabrica', sections: [
+    name: 'Fábrica de Caramelos', kind: 'race', palette: 'fabrica', sections: [
       ['start'], ['conveyor', { len: 40, speed: 3 }], ['punchers', { count: 6 }], ['logs', { count: 3 }],
       ['doors', { rows: 2 }], ['tiles', { cols: 6, rows: 9 }], ['ballRamp', { len: 36, rise: 9, every: 0.85 }], ['finish'],
     ],
   },
   cumbre: {
-    name: 'Cumbre Merengue', palette: 'cumbre', sections: [
+    name: 'Cumbre Merengue', kind: 'race', palette: 'cumbre', sections: [
       ['start'], ['gaps', { count: 6, gap: 3.6, moving: true }],
       ['sweepers', { discs: [[[LOW, 1.4], [LOW, -0.9]], [[LOW, -1.6], [HIGH, 1.0]], [[LOW, 1.9]]] }],
       ['logs', { count: 2 }], ['hammers', { count: 5, speed: 2.1, width: 3.4 }],
@@ -49,7 +49,20 @@ export const MAPS = {
       ['ballRamp', { len: 44, rise: 12, every: 0.8 }], ['finish'],
     ],
   },
+  // Supervivencia: si caes a la baba quedas eliminado
+  suelo: { name: 'Suelo de Gominola', kind: 'survival', time: 120, palette: 'pastel', sections: [['arena', { layers: 2, radius: 19 }]] },
+  comba: { name: 'Salta la Comba', kind: 'survival', time: 80, palette: 'fabrica', sections: [['jumpclub', {}]] },
+  // Finales
+  derrumbe: { name: 'Final: Derrumbe', kind: 'final', time: 240, palette: 'cumbre', sections: [['arena', { layers: 3, radius: 13 }]] },
+  corona: {
+    name: 'Final: Cumbre de la Corona', kind: 'final-race', time: 240, palette: 'pastel', sections: [
+      ['start'], ['doors', { rows: 2 }], ['gaps', { count: 4, gap: 3.6, moving: true }], ['seesaws', { count: 2 }],
+      ['hammers', { count: 5, speed: 2.0, width: 4 }], ['logs', { count: 2 }],
+      ['sweepers', { discs: [[[LOW, 1.5], [HIGH, -1.0]]] }], ['ballRamp', { len: 40, rise: 12, every: 0.7 }], ['crownTop'],
+    ],
+  },
 };
+export const KIND_LABEL = { race: 'Carrera', survival: 'Supervivencia', final: 'Final', 'final-race': 'Final' };
 
 // ---------- Texturas ----------
 function canvasTex(w, h, draw) {
@@ -99,7 +112,10 @@ export class Course {
     Object.assign(this, {
       mapId: MAPS[mapId] ? mapId : 'gominola', map, pal: PALETTES[map.palette],
       group: new THREE.Group(), bodies: [], kin: [], sections: [], balls: [], surfaces: new Map(), tileByHandle: new Map(), checkpoints: [],
+      kind: map.kind || 'race', timeLimit: map.time || 300, crown: null, finishZ: Infinity, finishY: Infinity,
     });
+    // En supervivencia y en la final de derrumbe no se reaparece: caer es quedar eliminado
+    this.noRespawn = this.kind === 'survival' || this.kind === 'final';
     this.scene.add(this.group);
     let z = 0, y = 0;
     map.sections.forEach(([type, opts], index) => {
@@ -262,7 +278,8 @@ export class Course {
     return { z: z + len, y };
   }
 
-  sweeper(cx, y, cz, len, speed, phase, colors) {
+  // angle(t): ángulo de la barra; omega(t): su velocidad de giro (para la IA)
+  sweeper(cx, y, cz, len, angle, omega, colors) {
     const R = this.R;
     const body = this.track(R.RigidBodyDesc.kinematicPositionBased().setTranslation(cx, y, cz));
     this.world.createCollider(R.ColliderDesc.cuboid(len, 0.32, 0.32).setFriction(0.3), body);
@@ -271,8 +288,16 @@ export class Course {
     const mesh = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.32, len * 2, 20).rotateZ(Math.PI / 2), candy(0xffffff, tex));
     mesh.castShadow = true;
     this.group.add(mesh);
-    this.kin.push({ body, mesh, at: t => ({ p: { x: cx, y, z: cz }, q: quatY(speed * t + phase) }) });
-    return { y, speed, phase };
+    this.kin.push({ body, mesh, at: t => ({ p: { x: cx, y, z: cz }, q: quatY(angle(t)) }) });
+    return { y, angle, omega };
+  }
+
+  // Tiempo hasta que una barra que gira alrededor de (cx, cz) pase por p (una barra es una línea: periodo π)
+  static barHit(bar, p, cx, cz, t) {
+    const w = bar.omega(t), phi = Math.atan2(p.x - cx, p.z - cz);
+    let gap = ((phi - (bar.angle(t) + Math.PI / 2)) * Math.sign(w)) % Math.PI;
+    if (gap < 0) gap += Math.PI;
+    return { tHit: gap / Math.max(0.05, Math.abs(w)), period: Math.PI / Math.max(0.05, Math.abs(w)) };
   }
 
   sweepers(sec, z, y, { discs }) {
@@ -295,7 +320,10 @@ export class Course {
       this.world.createCollider(this.R.ColliderDesc.cylinder(1, 11).setFriction(0.8), db);
       this.world.createCollider(this.R.ColliderDesc.cylinder(1.5, 1.3).setTranslation(0, 2.5, 0), db);
       const cols = [[hex(P.accent[2]), '#ffffff'], [hex(P.accent[3]), '#ffffff'], [hex(P.accent[0]), hex(P.accent[1])]];
-      const list = bars.map(([by, sp], j) => ({ ...this.sweeper(0, y + by, c, 10.6, sp, j * 1.7 + k, cols[(j + k) % 3]), y: by }));
+      const list = bars.map(([by, sp], j) => {
+        const ph = j * 1.7 + k;
+        return { ...this.sweeper(0, y + by, c, 10.6, t => sp * t + ph, () => sp, cols[(j + k) % 3]), y: by };
+      });
       sec.discs.push({ z: c, r: 11, bars: list });
       cz += 22;
       this.box(0, y - 1, cz + 2, 3, 1, 2, P.floor[2]);
@@ -306,15 +334,11 @@ export class Course {
       for (const disc of sec.discs) {
         const dx = c.p.x, dz = c.p.z - disc.z, r = Math.hypot(dx, dz);
         if (r > disc.r + 0.5 || r < 1.6) continue;
-        const phi = Math.atan2(dx, dz);
         let low = false, high = false;
         for (const bar of disc.bars) {
-          // ángulo que le falta a la barra (una línea que pasa por el centro: periodo π) para llegar al bot
-          let gap = ((phi - (bar.speed * c.t + bar.phase + Math.PI / 2)) * Math.sign(bar.speed)) % Math.PI;
-          if (gap < 0) gap += Math.PI;
-          const tHit = gap / Math.abs(bar.speed);
+          const { tHit, period } = Course.barHit(bar, c.p, 0, disc.z, c.t);
           if (bar.y < 1 && tHit < 0.22 + (1 - c.mem.skill) * 0.1) low = true;
-          if (bar.y > 2 && (tHit < 0.6 || tHit > Math.PI / Math.abs(bar.speed) - 0.2)) high = true;
+          if (bar.y > 2 && (tHit < 0.6 || tHit > period - 0.2)) high = true;
         }
         if (low && !high && c.grounded && Math.random() < 0.6 + c.mem.skill * 0.4) plan.jump = true;
       }
@@ -560,7 +584,7 @@ export class Course {
       mesh.castShadow = true; mesh.receiveShadow = true;
       this.group.add(mesh);
       const body = this.track(R.RigidBodyDesc.kinematicPositionBased().setTranslation(x, y - 0.4, tz));
-      const collider = this.world.createCollider(R.ColliderDesc.cuboid(size / 2 - 0.08, 0.4, size / 2 - 0.08).setFriction(0.8), body);
+      const collider = this.world.createCollider(R.ColliderDesc.cuboid(size / 2 - 0.01, 0.4, size / 2 - 0.01).setFriction(0.8), body);
       const tile = { x, z: tz, mesh, body, collider, state: 'ok', t0: 0, col: q, row: r };
       this.tileByHandle.set(collider.handle, { sec, i: sec.tiles.length });
       sec.tiles.push(tile);
@@ -576,12 +600,13 @@ export class Course {
     sec.step = t => {
       for (const tile of sec.tiles) {
         const u = t - tile.t0;
-        if (tile.state === 'shake' && u > 0.75) tile.state = 'fall';
-        if (tile.state === 'fall') {
-          const d = (u - 0.75) ** 2 * 9;
-          tile.body.setNextKinematicTranslation({ x: tile.x, y: y - 0.4 - d, z: tile.z });
-          if (u > 1.7) { tile.state = 'gone'; tile.collider.setEnabled(false); tile.mesh.visible = false; }
+        if (tile.state === 'shake' && u > 0.75) {
+          tile.state = 'fall';
+          const away = { x: tile.x, y: -200, z: tile.z };
+          tile.body.setTranslation(away, true);
+          tile.body.setNextKinematicTranslation(away);
         }
+        if (tile.state === 'fall' && u > 1.7) { tile.state = 'gone'; tile.mesh.visible = false; }
         if (tile.state === 'gone' && u > 7) {
           tile.state = 'ok';
           const home = { x: tile.x, y: y - 0.4, z: tile.z };
@@ -594,8 +619,8 @@ export class Course {
     sec.sync = t => {
       for (const tile of sec.tiles) {
         if (tile.state === 'gone') continue;
-        const p = tile.body.translation(), jitter = tile.state === 'shake' ? Math.sin(t * 60) * 0.05 : 0;
-        tile.mesh.position.set(p.x + jitter, p.y, p.z);
+        const u = t - tile.t0, jitter = tile.state === 'shake' ? Math.sin(t * 60) * 0.05 : 0;
+        tile.mesh.position.set(tile.x + jitter, y - 0.4 - (tile.state === 'fall' ? Math.max(0, u - 0.75) ** 2 * 9 : 0), tile.z);
       }
     };
     sec.reset = () => {
@@ -638,6 +663,207 @@ export class Course {
     line.position.set(0, y + 0.02, this.finishZ);
     this.group.add(banner, line);
     sec.ai = (plan) => { plan.tx = 0; plan.tz = this.finishZ + 4; };
+    return { z: z + 18, y };
+  }
+
+  // Arena de baldosas que se caen al pisarlas (uno o varios pisos). Se dibujan con InstancedMesh: cientos de baldosas, pocas llamadas de dibujo
+  arena(sec, z, y, { layers = 1, radius = 13, size = 1.8, gap = 6 }) {
+    const P = this.pal, R = this.R, cz = z + radius + 3, top = y + (layers - 1) * gap;
+    const cells = [];
+    for (let gx = -radius; gx <= radius + 0.01; gx += size) for (let gz = -radius; gz <= radius + 0.01; gz += size) if (Math.hypot(gx, gz) <= radius - size * 0.3) cells.push([gx, gz]);
+    const geo = new RoundedBoxGeometry(size - 0.1, 0.7, size - 0.1, 1, 0.08); // pocos polígonos: se dibuja cientos de veces
+    const M = new THREE.Matrix4(), col = new THREE.Color(), HIDE = new THREE.Matrix4().makeScale(0, 0, 0);
+    const grid = new Map(); // "piso:columna:fila" → índice de baldosa
+    sec.tiles = [];
+    // La rejilla empieza en -radius: hay que contar desde ahí para dar con la baldosa correcta
+    const tileAt = (L, x, z) => sec.tiles[grid.get(`${L}:${Math.round((x + radius) / size)}:${Math.round((z - cz + radius) / size)}`)];
+    for (let L = 0; L < layers; L++) {
+      const ly = top - L * gap - 0.35;
+      const inst = new THREE.InstancedMesh(geo, candy(0xffffff), cells.length);
+      inst.castShadow = true; inst.receiveShadow = true;
+      cells.forEach(([gx, gz], k) => {
+        const x = gx, tz = cz + gz;
+        inst.setMatrixAt(k, M.makeTranslation(x, ly, tz));
+        inst.setColorAt(k, col.set(P.accent[L % P.accent.length]).offsetHSL(0, 0, k % 2 ? 0.06 : -0.04));
+        const body = this.track(R.RigidBodyDesc.kinematicPositionBased().setTranslation(x, ly, tz));
+        const collider = this.world.createCollider(R.ColliderDesc.cuboid(size / 2 - 0.01, 0.35, size / 2 - 0.01).setFriction(0.8), body);
+        this.tileByHandle.set(collider.handle, { sec, i: sec.tiles.length });
+        grid.set(`${L}:${Math.round((gx + radius) / size)}:${Math.round((gz + radius) / size)}`, sec.tiles.length);
+        sec.tiles.push({ x, y: ly, z: tz, inst, k, body, collider, state: 'ok', t0: 0, layer: L });
+      });
+      this.group.add(inst);
+    }
+    const active = new Set();
+    const shake = (i, t) => {
+      const tile = sec.tiles[i];
+      if (!tile || tile.state !== 'ok') return false;
+      tile.state = 'shake'; tile.t0 = t;
+      active.add(tile);
+      return true;
+    };
+    // Al empezar a caer, la baldosa deja de existir para la física (se manda lejos) y solo se anima su caída:
+    // así no aplasta a nadie en el piso de abajo
+    sec.step = t => {
+      for (const tile of active) {
+        const u = t - tile.t0;
+        if (tile.state === 'shake' && u > 1.2) {
+          tile.state = 'fall';
+          const away = { x: tile.x, y: -200, z: tile.z };
+          tile.body.setTranslation(away, true);
+          tile.body.setNextKinematicTranslation(away);
+        }
+        if (tile.state === 'fall' && u > 2.1) tile.state = 'gone';
+      }
+    };
+    sec.sync = t => {
+      const dirty = new Set();
+      for (const tile of active) {
+        if (tile.state === 'gone') { tile.inst.setMatrixAt(tile.k, HIDE); active.delete(tile); }
+        else {
+          const u = t - tile.t0, j = tile.state === 'shake' ? Math.sin(t * 55 + tile.k) * 0.06 : 0;
+          const yv = tile.state === 'fall' ? tile.y - Math.max(0, u - 1.2) ** 2 * 9 : tile.y;
+          tile.inst.setMatrixAt(tile.k, M.makeTranslation(tile.x + j, yv, tile.z));
+        }
+        dirty.add(tile.inst);
+      }
+      for (const inst of dirty) inst.instanceMatrix.needsUpdate = true;
+    };
+    sec.reset = () => {
+      active.clear();
+      for (const tile of sec.tiles) {
+        const home = { x: tile.x, y: tile.y, z: tile.z };
+        Object.assign(tile, { state: 'ok', t0: 0 });
+        tile.body.setTranslation(home, true);
+        tile.body.setNextKinematicTranslation(home);
+        tile.collider.setEnabled(true);
+        tile.inst.setMatrixAt(tile.k, M.makeTranslation(tile.x, tile.y, tile.z));
+        tile.inst.instanceMatrix.needsUpdate = true;
+      }
+    };
+    sec.ground = (i, t) => (shake(i, t) ? { k: 'tile', i, t } : null);
+    sec.remote = e => { if (e.k === 'tile') shake(e.i, e.t); return null; };
+    // IA: ir de baldosa sana en baldosa sana del piso en el que está, mejor cerca del centro
+    sec.ai = (plan, c) => {
+      plan.noStuck = true;
+      const layer = Math.max(0, Math.min(layers - 1, Math.round((top - (c.p.y - 0.9)) / gap)));
+      const ok = tile => tile && tile.state === 'ok' && tile.layer === layer;
+      let target = c.mem.arenaTarget != null ? sec.tiles[c.mem.arenaTarget] : null;
+      c.mem.arenaT = (c.mem.arenaT ?? 0) - c.dt;
+      const under = tileAt(layer, c.p.x, c.p.z);
+      const moveOn = under && under.state !== 'ok'; // la baldosa bajo los pies ya tiembla: hay que moverse
+      if (!ok(target) || Math.hypot(target.x - c.p.x, target.z - c.p.z) < 0.8 || c.mem.arenaT <= 0 || (moveOn && c.mem.arenaT < 0.6)) {
+        let best = null, bestScore = -1e9;
+        // Revisa todas las baldosas a su alrededor (radio de 3) y elige la mejor
+        for (let ox = -3; ox <= 3; ox++) for (let oz = -3; oz <= 3; oz++) {
+          if (!ox && !oz) continue;
+          const tile = tileAt(layer, c.p.x + ox * size, c.p.z + oz * size);
+          if (!ok(tile)) continue;
+          const d = Math.hypot(tile.x - c.p.x, tile.z - c.p.z);
+          // Solo destinos a los que se llega en línea recta sin pasar por agujeros (la baldosa propia
+          // siempre tiembla porque la estamos pisando, y pasar por una que tiembla es seguro)
+          let clear = true;
+          for (let s = 0.6; s < d; s += 0.6) {
+            const f = s / d, step = tileAt(layer, c.p.x + (tile.x - c.p.x) * f, c.p.z + (tile.z - c.p.z) * f);
+            if (step === under) continue;
+            if (!step || (step.state !== 'ok' && step.state !== 'shake')) { clear = false; break; }
+          }
+          if (!clear) continue;
+          // Densidad de baldosas sanas alrededor y gente cerca
+          let dense = 0;
+          for (const [ox, oz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [2, 0], [-2, 0], [0, 2], [0, -2], [1, 1], [-1, -1], [1, -1], [-1, 1]]) {
+            const nb = tileAt(layer, tile.x + ox * size, tile.z + oz * size);
+            if (nb && nb.state === 'ok') dense++;
+          }
+          let crowd = 0;
+          for (const o of this.beanPositions || []) if (Math.abs(o.y - c.p.y) < 3 && Math.hypot(o.x - tile.x, o.z - tile.z) < 3) crowd++;
+          const score = dense - crowd * 2 - Math.abs(d - 2.5) * 0.5 - Math.hypot(tile.x, tile.z - cz) * 0.04 + Math.random() * 1.5;
+          if (score > bestScore) { best = tile; bestScore = score; }
+        }
+        target = best;
+        c.mem.arenaTarget = best ? sec.tiles.indexOf(best) : null;
+        c.mem.arenaT = 1.2 + Math.random() * 1.2;
+      }
+      // Sin destino posible, mejor quedarse quieto que ir hacia los agujeros
+      plan.tx = target ? target.x : c.p.x;
+      plan.tz = target ? target.z : c.p.z;
+      plan.speed = 0.35 + c.mem.skill * 0.1; // en la arena, caminando: corriendo se destruye el suelo enseguida
+    };
+    this.spawn = i => { const a = (i / 16) * Math.PI * 2, r = radius * 0.55; return { x: Math.sin(a) * r, y: top + FOOT + 0.1, z: cz + Math.cos(a) * r }; };
+    return { z: cz + radius + 3, y };
+  }
+
+  // «Salta la comba»: una barra baja (hay que saltarla) y otra alta (solo se pasa en plancha), cada vez más rápidas
+  jumpclub(sec, z, y, { radius = 12.5 }) {
+    const P = this.pal, cz = z + radius + 3;
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, 2, 64), candy(P.floor[0], STRIPES));
+    m.position.set(0, y - 1, cz);
+    m.castShadow = true; m.receiveShadow = true;
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(radius, 0.3, 10, 64).rotateX(Math.PI / 2), candy(P.trim));
+    ring.position.set(0, y, cz);
+    const hub = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.5, 3.2, 24), candy(P.wall));
+    hub.position.set(0, y + 1.6, cz);
+    hub.castShadow = true;
+    this.group.add(m, ring, hub);
+    const db = this.track(this.R.RigidBodyDesc.fixed().setTranslation(0, y - 1, cz));
+    this.world.createCollider(this.R.ColliderDesc.cylinder(1, radius).setFriction(0.8), db);
+    this.world.createCollider(this.R.ColliderDesc.cylinder(1.6, 1.35).setTranslation(0, 2.6, 0), db);
+    const tt = t => Math.max(0, t);
+    const len = radius - 0.3;
+    sec.bars = [
+      { ...this.sweeper(0, y + 0.55, cz, len, t => 0.6 + 0.55 * tt(t) + 0.004 * tt(t) ** 2, t => 0.55 + 0.008 * tt(t), [hex(P.accent[1]), '#ffffff']), low: true },
+      { ...this.sweeper(0, y + 1.45, cz, len, t => 2.2 - (0.34 * tt(t) + 0.003 * tt(t) ** 2), t => -(0.34 + 0.006 * tt(t)), [hex(P.accent[2]), '#ffffff']), low: false },
+    ];
+    sec.ai = (plan, c) => {
+      plan.noStuck = true;
+      const r = Math.hypot(c.p.x, c.p.z - cz), phi = Math.atan2(c.p.x, c.p.z - cz);
+      // Pasea por la zona exterior (radio ~7,5): ahí las barras pasan rápido; cerca del centro se quedan encima mucho rato
+      const want = phi + 0.12;
+      plan.tx = Math.sin(want) * 7.5; plan.tz = cz + Math.cos(want) * 7.5;
+      if (r < 2) return;
+      for (const bar of sec.bars) {
+        const { tHit } = Course.barHit(bar, c.p, 0, cz, c.t);
+        if (bar.low && tHit < 0.2 + (1 - c.mem.skill) * 0.12 && Math.random() < 0.55 + c.mem.skill * 0.45) plan.jump = true;
+        if (!bar.low && tHit < 0.4 && tHit > 0.1 && Math.random() < 0.5 + c.mem.skill * 0.5) {
+          // Plancha de lado, hacia la barra que llega, para pasar por debajo cuanto antes
+          const s = -Math.sign(bar.omega(c.t));
+          plan.dive = true;
+          plan.tx = c.p.x + s * Math.cos(phi) * 3; plan.tz = c.p.z - s * Math.sin(phi) * 3;
+        }
+      }
+    };
+    this.spawn = i => { const a = (i / 16) * Math.PI * 2; return { x: Math.sin(a) * 7, y: y + FOOT + 0.1, z: cz + Math.cos(a) * 7 }; };
+    return { z: cz + radius + 3, y };
+  }
+
+  // Final de carrera: la corona flota sobre un pedestal; hay que saltar para cogerla
+  crownTop(sec, z, y) {
+    const P = this.pal;
+    this.box(0, y - 1, z + 9, 9, 1, 9, P.floor[1]);
+    this.walls(z, z + 18, y, 9, P.wall, 3);
+    this.pillar(0, y, z + 10, 1.4, 0.7, P.trim);
+    const g = new THREE.Group();
+    const gold = new THREE.MeshPhysicalMaterial({ color: 0xffc23d, metalness: 1, roughness: 0.2, emissive: 0x6b4200, emissiveIntensity: 0.6 });
+    const band = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.5, 0.35, 32, 1, true), gold);
+    band.material.side = THREE.DoubleSide;
+    g.add(band);
+    for (let k = 0; k < 5; k++) {
+      const a = (k / 5) * Math.PI * 2;
+      const spike = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.38, 10), gold);
+      spike.position.set(Math.sin(a) * 0.52, 0.34, Math.cos(a) * 0.52);
+      const ball = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), gold);
+      ball.position.set(Math.sin(a) * 0.52, 0.55, Math.cos(a) * 0.52);
+      g.add(spike, ball);
+    }
+    g.position.set(0, y + 2.75, z + 10);
+    g.scale.setScalar(1.4);
+    g.traverse(o => { o.castShadow = true; });
+    this.group.add(g);
+    this.crown = { x: 0, y: y + 2.75, z: z + 10 };
+    sec.sync = t => { g.rotation.y = t * 1.5; g.position.y = y + 2.75 + Math.sin(t * 2) * 0.12; };
+    sec.ai = (plan, c) => {
+      plan.tx = 0; plan.tz = z + 10;
+      if (Math.hypot(c.p.x, c.p.z - (z + 10)) < 2.2 && c.grounded) plan.jump = true;
+    };
     return { z: z + 18, y };
   }
 

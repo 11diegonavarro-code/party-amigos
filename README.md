@@ -4,7 +4,9 @@ Carrera de obstáculos con gominolas para jugar con amigos desde el navegador.
 
 - Crea una sala online y comparte el enlace; los demás solo tienen que abrirlo y pulsar «Unirse».
 - Conexión directa entre navegadores (WebRTC) con respaldo automático por servidores MQTT públicos, y reloj sincronizado con el anfitrión para que los obstáculos se vean igual en todas las pantallas.
-- Física con Rapier: empujones, tropiezos, balancines y bolas rodando.
+- Física con Rapier: empujones, tropiezos, balancines y bolas rodando, plancha y agarrar (F / clic izquierdo).
+- Show con eliminatorias: carreras (Carrera Gominola, Fábrica de Caramelos, Cumbre Merengue), supervivencia (Suelo de Gominola, Salta la Comba) y finales (Derrumbe, Cumbre de la Corona) hasta que uno gana la corona.
+- Personaliza tu gominola: colores, estampado, sombrero y cara. El sombrero de corona se desbloquea ganando un show.
 
 ## Créditos
 
